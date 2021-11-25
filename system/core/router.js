@@ -2,7 +2,7 @@ const view = require('./view');
 const globals = require('./global');
 const express = require('express');
 const router = express.Router();
-const glob = require('glob')
+const glob = require('glob');
 // const q = require('q')
 
 const app = view.app;

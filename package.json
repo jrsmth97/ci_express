@@ -11,10 +11,11 @@
     "nodemon": "^2.0.6"
   },
   "dependencies": {
-    "dotenv": "^8.2.0",
+    "dotenv": "^10.0.0",
     "express": "^4.17.1",
-    "express-handlebars": "^5.2.0",
+    "express-handlebars": "^6.0.2",
     "glob": "^7.1.6",
+    "mysql": "^2.18.1",
     "q": "^1.5.1"
   }
 }

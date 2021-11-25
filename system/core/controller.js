@@ -4,7 +4,7 @@ class CE_Controller {
         this.req = req;
         this.res = res;
         this.view = require('./view');
-        this.model
+        this.model;
         this.app = this.view.app;
     }
 
