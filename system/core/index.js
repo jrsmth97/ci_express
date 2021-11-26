@@ -1,11 +1,11 @@
 require('dotenv').config();
 const router = require('./router');
 const view = require('./view');
-const CE_Controller = require('./controller');
-const CE_Model = require('./model');
+const NI_Controller = require('./controller');
+const NI_Model = require('./model');
 
-global.CE_Controller = CE_Controller;
-global.CE_Model = CE_Model;
+global.NI_Controller = NI_Controller;
+global.NI_Model = NI_Model;
 
 const app = view.app;
 

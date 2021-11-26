@@ -1,10 +1,11 @@
-class Crud extends CE_Model {
+class Crud extends NI_Model {
     constructor(req, res) {
         super(req, res)   
     }
 
     async test(){
-        const results = await this.db.query("SELECT * FROM mahasiswa")
+        this.db.where('nama', 'marx')
+        const results = await this.db.get('mahasiswa')
         console.log(results)
     }
 }

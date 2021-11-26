@@ -1,5 +1,5 @@
 
-class Berita extends CE_Controller {
+class Berita extends NI_Controller {
 
     constructor(req, res) {
         super(req, res);
