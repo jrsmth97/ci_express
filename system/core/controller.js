@@ -1,5 +1,5 @@
 
-class CE_Controller {
+class NI_Controller {
     constructor(req, res) {
         this.req = req;
         this.res = res;
@@ -19,4 +19,4 @@ class CE_Controller {
     }
 
 }
-module.exports = CE_Controller;
+module.exports = NI_Controller;
