@@ -6,7 +6,7 @@ class Berita extends NI_Controller {
         this.load.model('b/home/crud', 'crud');
     }
 
-    index(param1 = '', param2 = '', param3 = '', params = {}) {
+    async index(param1 = '', param2 = '', param3 = '', params = {}) {
         console.log('Berita Index has loaded. |', param1, '|', param2, '|', param3);
         console.log('ini queryString ctrl', params.query);
 
