@@ -1,8 +1,8 @@
 {
-  "name": "chat",
+  "name": "node-igniter",
   "version": "1.0.0",
   "main": "index.js",
-  "author": "nurariefhs",
+  "author": "nurariefhs_jrsmth",
   "license": "MIT",
   "scripts": {
     "serve": "nodemon ${main}"
