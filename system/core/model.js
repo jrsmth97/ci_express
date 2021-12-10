@@ -148,7 +148,7 @@ class NI_Model {
                 return this
             }
             const sql = "WHERE ?? = ?"
-            const inserts = [row, value]
+            const inserts = [field, value]
             this.preparedQueries.where = mysql.format(sql, inserts)
             return this
         },
@@ -276,6 +276,39 @@ class NI_Model {
                     resolve(result.affectedRows)
                 }
                 this.dbConnect.query(sql, callback)
+            }).catch(err => { throw err })
+        },
+
+        /** 
+         * DB DELETE CHAIN METHOD 
+         * @params table | String
+         * @params where | OBJ
+         * return number of affected row based prepared sql query updated before
+         */
+        delete: async (table, where = []) => {
+            let preparedWhere = ""
+            if (where instanceof Array) preparedWhere = this.preparedQueries.where || ""
+            else {
+                const fields = Object.keys(where)
+                const values = Object.values(where)
+                for (let i = 0; i < fields.length; i++) {
+                    preparedWhere += `WHERE ${fields[i]} = '${values[i]}'${(i+1) == fields.length ? '' : ', '}`
+                }
+            } 
+
+            return new Promise((resolve, reject) => {
+                const callback = (error, result) => {
+                    if (error) {
+                        reject(error)
+                        return
+                    }
+                    resolve(result.affectedRows)
+                }
+                if(table instanceof Array) {
+                    table.forEach(tab => {
+                        this.dbConnect.query(`DELETE FROM ${tab} ${preparedWhere}`, callback)
+                    })
+                } else this.dbConnect.query(`DELETE FROM ${table} ${preparedWhere}`, callback)
             }).catch(err => { throw err })
         },
         
