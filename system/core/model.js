@@ -13,9 +13,11 @@ class NI_Model {
         })
         this.preparedQueries = {
             where:        null,
+            from:         null,
             like:         null,
             field:        null,
             join:         null,
+            having:       null,
             orderBy:      null,
             groupBy:      null,
             limit:        null,
@@ -31,6 +33,13 @@ class NI_Model {
      * RETURN PACKAGE_ROWS | OBJ
      */
     get(table) { return this.db.get(table) }
+
+    /** 
+     * GENERATE QUERY HANDLER
+     * @params table | Strings
+     * RETURN STRING QUERY
+     */
+    get_compiled_select(table) { return this.db.get_compiled_select(table) }
 
     /** 
      * GET QUERY HANDLER
@@ -153,9 +162,9 @@ class NI_Model {
                 const values = Object.values(field)
                 for(let i = 0; i < keys.length; i++) {
                     if(this.isCustomOperator(keys[i]) && this.isValidSqlOperator(keys[i].split(' ')[1])) {
-                        bulkWhere += `${keys[i]} '${this.filterString(values[i])}'${(i+1) != keys.length ? ' AND ' : ''}`
+                        bulkWhere += `${keys[i]} '${this.filterString(values[i])}'${this.setDelimiter(i, keys, ' AND')}`
                     } else {
-                        bulkWhere += `${keys[i].split(' ')[0]} = '${this.filterString(values[i])}'${(i+1) != keys.length ? ' AND ' : ''}`
+                        bulkWhere += `${keys[i].split(' ')[0]} = '${this.filterString(values[i])}'${this.setDelimiter(i, keys, ' AND')}`
                     }
                 }
                 
@@ -170,10 +179,10 @@ class NI_Model {
                 }
 
                 // Handle custom sql in bracket
-                if (field.indexOf('(') !== -1) {
-                    this.preparedQueries.where = `WHERE ${field.replace(/[()]/g, '')}`
-                    return this
-                }
+                // if (field.indexOf('(') !== -1) {
+                //     this.preparedQueries.where = `WHERE ${field.replace(/[()]/g, '')}`
+                //     return this
+                // }
 
                 const customOperator = field.split(' ')[1]
                 if (customOperator !== undefined && this.isValidSqlOperator(customOperator)) {
@@ -227,7 +236,7 @@ class NI_Model {
          */
         where_in: (field, values = []) => {
             if(values.length <= 0) return   
-            const sql = `WHERE ${field} IN ('${values.join("', '")}')`
+            const sql = ` WHERE ${field} IN ('${values.join("', '")}')`
             this.preparedQueries.where = sql
             return this
         },
@@ -254,7 +263,7 @@ class NI_Model {
          */
         where_not_in: (field, values = []) => {
             if(values.length <= 0) return   
-            const sql = `WHERE ${field} NOT IN ('${values.join("', '")}')`
+            const sql = ` WHERE ${field} NOT IN ('${values.join("', '")}')`
             this.preparedQueries.where = sql
             return this
         },
@@ -284,12 +293,12 @@ class NI_Model {
             value     = this.filterString(value, true)
 
             if(field instanceof Object) {
-                let bulkLike = "WHERE "
+                let bulkLike = " WHERE "
                 const keys = Object.keys(field)
                 const values = Object.values(field)
                 for(let i = 0; i < keys.length; i++) {
                     let preSql = `?? LIKE '%${values[i]}%' ESCAPE '!'`
-                    bulkLike += `${mysql.format(preSql, keys[i])}${(i+1) != keys.length ? ' AND ' : ''}`
+                    bulkLike += `${mysql.format(preSql, keys[i])}${this.setDelimiter(i, keys, ' AND')}`
                 }
                 
                 this.preparedQueries.like = bulkLike
@@ -315,7 +324,7 @@ class NI_Model {
                 
                 const inserts = [field]
             if (this.preparedQueries.like == null) {
-                this.preparedQueries.like = `WHERE ${mysql.format(sql, inserts)}`
+                this.preparedQueries.like = ` WHERE ${mysql.format(sql, inserts)}`
             } else {
                 this.preparedQueries.like += ` AND ${mysql.format(sql, inserts)}`
             }
@@ -351,12 +360,12 @@ class NI_Model {
             value     = this.filterString(value, true)
 
             if(field instanceof Object) {
-                let bulkLike = "WHERE "
+                let bulkLike = " WHERE "
                 const keys = Object.keys(field)
                 const values = Object.values(field)
                 for(let i = 0; i < keys.length; i++) {
                     let preSql = `?? NOT LIKE '%${values[i]}%' ESCAPE '!'`
-                    bulkLike += `${mysql.format(preSql, keys[i])}${(i+1) != keys.length ? ' AND ' : ''}`
+                    bulkLike += `${mysql.format(preSql, keys[i])}${this.setDelimiter(i, keys, ' AND')}`
                 }
                 
                 this.preparedQueries.like = bulkLike
@@ -366,7 +375,7 @@ class NI_Model {
             const sql     = `?? NOT LIKE '%${value}%' ESCAPE '!'`
             const inserts = [field]
             if (this.preparedQueries.like == null) {
-                this.preparedQueries.like = `WHERE ${mysql.format(sql, inserts)}`
+                this.preparedQueries.like = ` WHERE ${mysql.format(sql, inserts)}`
             } else {
                 this.preparedQueries.like += ` AND ${mysql.format(sql, inserts)}`
             }
@@ -386,8 +395,6 @@ class NI_Model {
             const sql = " OR ?? NOT LIKE ? ESCAPE '!'"
             const inserts = [field, value]
             this.preparedQueries.like += mysql.format(sql, inserts)
-
-            console.log(this.preparedQueries.like)
             return this
         },
 
@@ -396,10 +403,72 @@ class NI_Model {
          * @params field | String
          * insert selected fields query to prepared var
          */
-        select: (field) => {
-            const sql = "??"
-            const insert = [field]
-            this.preparedQueries.field = mysql.format(sql, insert)
+        select: (field) => {  
+            let selectQuery = "" 
+
+            // Handle custom select sql in bracket
+            if (field.indexOf('(') !== -1 || field.indexOf('as') !== -1 || field.indexOf('AS') !== -1) {
+                this.preparedQueries.field = field
+                return this
+            }
+
+            const fieldArray  = field.split(', ')   
+            fieldArray.forEach((f, i) => {
+                const sql = "??"
+                const insert = [f]
+                selectQuery += `${mysql.format(sql, insert)}${this.setDelimiter(i, fieldArray, ',')}`
+            })
+
+            if (this.preparedQueries.field == null) {
+                this.preparedQueries.field = selectQuery
+            } else {
+                this.preparedQueries.field += `, ${selectQuery}`
+            }
+
+            return this
+        },
+
+        /** 
+         * DB SELECT MAX CHAIN METHOD 
+         * @params field   | String
+         * @params asField | String
+         * insert max selected fields query to prepared var
+         */
+        select_max: (field, asField = null) => {
+            this.generateSelect('max', field, asField)
+            return this
+        },
+
+        /** 
+         * DB SELECT MIN CHAIN METHOD 
+         * @params field   | String
+         * @params asField | String
+         * insert min selected fields query to prepared var
+         */
+        select_min: (field, asField = null) => {
+            this.generateSelect('min', field, asField)
+            return this
+        },
+
+        /** 
+         * DB SELECT AVG CHAIN METHOD 
+         * @params field   | String
+         * @params asField | String
+         * insert AVG selected fields query to prepared var
+         */
+        select_avg: (field, asField = null) => {
+            this.generateSelect('avg', field, asField)
+            return this
+        },
+
+        /** 
+         * DB SELECT SUM CHAIN METHOD 
+         * @params field   | String
+         * @params asField | String
+         * insert SUM selected fields query to prepared var
+         */
+        select_sum: (field, asField = null) => {
+            this.generateSelect('sum', field, asField)
             return this
         },
 
@@ -409,9 +478,14 @@ class NI_Model {
          * insert selected fields query to prepared var
          */
         distinct: (field) => {
-            const sql = "DISTINCT ??"
+            const sql = "??"
             const insert = [field]
-            this.preparedQueries.field = mysql.format(sql, insert)
+
+            if (this.preparedQueries.field == null) {
+                this.preparedQueries.field = `DISTINCT ${mysql.format(sql, insert)}`
+            } else {
+                this.preparedQueries.field += `, ${mysql.format(sql, insert)}`
+            }
             return this
         },
 
@@ -423,7 +497,12 @@ class NI_Model {
          * insert join statements sql query to prepared var
          */
         join: (joinTable, condition, type = 'INNER') => {
-            this.preparedQueries.join = `${type} JOIN ${joinTable} ON ${condition}`
+            if (this.preparedQueries.join == null) {
+                this.preparedQueries.join = ` ${type} JOIN ${joinTable} ON ${condition}`
+            } else {
+                this.preparedQueries.join += ` ${type} JOIN ${joinTable} ON ${condition}`
+            }
+
             return this
         },
 
@@ -434,7 +513,7 @@ class NI_Model {
          * insert orderby statements sql query to prepared var
          */
         limit: (limit, offset) => {
-            this.preparedQueries.limit = `LIMIT ${limit}${offset ? ', '+offset : ''}`
+            this.preparedQueries.limit = ` LIMIT ${limit}${offset ? ', '+offset : ''}`
             return this
         },
 
@@ -445,7 +524,13 @@ class NI_Model {
          * insert orderby statements sql query to prepared var
          */
         order_by: (field, type = 'ASC') => {
-            this.preparedQueries.orderBy = `ORDER BY ${field} ${type}`
+            let fieldQuery = type == 'RANDOM' ? "" : field
+            let randomValue = ''
+            if (Number.isInteger(field)) {
+                randomValue = field
+                fieldQuery  = ""
+            }
+            this.preparedQueries.orderBy = ` ORDER BY ${fieldQuery}${type == 'RANDOM' ? 'RAND('+randomValue+')' : ' '+type}`
             return this
         },
 
@@ -456,11 +541,52 @@ class NI_Model {
          */
         group_by: (field) => {
             if(field instanceof Array) {
-                this.preparedQueries.groupBy = `GROUP BY ${field.join(', ')}`
+                this.preparedQueries.groupBy = ` GROUP BY ${field.join(', ')}`
             } else {
-                this.preparedQueries.groupBy = `GROUP BY ${field}`
+                this.preparedQueries.groupBy = ` GROUP BY ${field}`
             }
 
+            return this
+        },
+
+        /** 
+         * DB SELECT FROM CHAIN METHOD 
+         * @params table | String
+         * insert from table statements sql query to prepared var
+         */
+        from: (table) => {
+            if (this.preparedQueries.from == null) {
+                this.preparedQueries.from = this.filterString(table)
+            } else {
+                this.preparedQueries.from += `, ${this.filterString(table)}`
+            }
+
+            return this
+        },
+
+        /** 
+         * DB HAVING CHAIN METHOD 
+         * @params statement | String
+         * insert having aggregate statements sql query to prepared var
+         */
+        having: (statement) => {
+            if (this.preparedQueries.having == null) {
+                this.preparedQueries.having = ` HAVING ${this.filterString(statement)}`
+            } else {
+                this.preparedQueries.having += ` AND ${this.filterString(statement)}`
+            }
+
+            return this
+        },
+
+        /** 
+         * DB OR HAVING CHAIN METHOD 
+         * @params statement | String
+         * insert additional OR having aggregate statements sql query to prepared var
+         */
+        or_having: (statement) => {
+            if(this.preparedQueries.having == null) return
+            this.preparedQueries.having += ` OR ${statement}`
             return this
         },
 
@@ -469,16 +595,18 @@ class NI_Model {
          * @params table | String
          * return value based prepared sql query inserted before
          */
-        get: async (table) => {
-            const where = this.preparedQueries.where        || ""
-            const like = this.preparedQueries.like          || ""
-            const field = this.preparedQueries.field        || "*"
-            const join = this.preparedQueries.join          || ""
-            const orderBy = this.preparedQueries.orderBy    || ""
-            const groupBy = this.preparedQueries.groupBy    || ""
-            const limit = this.preparedQueries.limit        || ""
+        get: async (table = null) => {
+            const where     = this.preparedQueries.where    || ""
+            const from      = this.preparedQueries.from     || ""
+            const like      = this.preparedQueries.like     || ""
+            const field     = this.preparedQueries.field    || "*"
+            const join      = this.preparedQueries.join     || ""
+            const having    = this.preparedQueries.having   || ""
+            const orderBy   = this.preparedQueries.orderBy  || ""
+            const groupBy   = this.preparedQueries.groupBy  || ""
+            const limit     = this.preparedQueries.limit    || ""
 
-            const query = `SELECT ${field} FROM ${table} ${join} ${where}${like} ${orderBy} ${groupBy} ${limit}`
+            const query = `SELECT ${field} FROM ${table ? table : from}${join}${where}${like}${having}${orderBy}${groupBy}${limit}`
 
             console.log(query)
             return new Promise((resolve, reject) => {
@@ -490,7 +618,63 @@ class NI_Model {
                     resolve(result)
                 }
                 this.dbConnect.query(query, callback)
-            }).catch(err => { throw err })
+            }).catch(err => { throw new Error(err) })
+        },
+
+        /** 
+         * DB COMPILE GET QUERY CHAIN METHOD 
+         * @params table | String
+         * return string query without run it
+         */
+        get_compiled_select: (table = null) => {
+            const where     = this.preparedQueries.where    || ""
+            const from      = this.preparedQueries.form     || ""
+            const like      = this.preparedQueries.like     || ""
+            const field     = this.preparedQueries.field    || "*"
+            const join      = this.preparedQueries.join     || ""
+            const having    = this.preparedQueries.having   || ""
+            const orderBy   = this.preparedQueries.orderBy  || ""
+            const groupBy   = this.preparedQueries.groupBy  || ""
+            const limit     = this.preparedQueries.limit    || ""
+
+            const query = `SELECT ${field} FROM ${table ? table : from}${join}${where}${like}${having}${orderBy}${groupBy}${limit}`
+
+            return String(query)
+        },
+
+        /** 
+         * DB GET WHERE CHAIN METHOD 
+         * @params table  | String
+         * @params where  | OBJ
+         * @params limit  | INT
+         * @params offset | INT 
+         * return value get where with options limit and offset
+         */
+        get_where: async (table, where = {}, limit = "", offset = "") => {
+            const field       = this.preparedQueries.field || "*"
+            const limitQuery  = limit == "" ? "" : ` LIMIT ${limit}`
+            const offsetQuery = offset == "" ? "" : ` OFFSET ${offset}`
+
+            let whereQuery = ""
+            const rows   = Object.keys(where)
+            const values = Object.values(where)
+            rows.forEach((r, index)=> {
+                whereQuery += `${r} = '${values[index]}'${(index+1) == rows.length ? '' : ', '}`
+            })
+
+            const sql = `SELECT ${field} FROM ${table} WHERE ${whereQuery}${limitQuery}${offsetQuery}`
+
+            console.log(sql)
+            return new Promise((resolve, reject) => {
+                const callback = (error, result) => {
+                    if (error) {
+                        reject(error)
+                        return
+                    }
+                    resolve(result)
+                }
+                this.dbConnect.query(sql, callback)
+            }).catch(err => { throw new Error(err) })
         },
 
         /** 
@@ -510,7 +694,7 @@ class NI_Model {
                     resolve(result.affectedRows)
                 }
                 this.dbConnect.query(sql, callback)
-            }).catch(err => { throw err })
+            }).catch(err => { throw new Error(err) })
         },
 
         /** 
@@ -530,7 +714,7 @@ class NI_Model {
                     resolve(result.affectedRows)
                 }
                 this.dbConnect.query(sql, callback)
-            }).catch(err => { throw err })
+            }).catch(err => { throw new Error(err) })
         },
 
         /** 
@@ -562,7 +746,7 @@ class NI_Model {
                     resolve(result.affectedRows)
                 }
                 this.dbConnect.query(sql, callback)
-            }).catch(err => { throw err })
+            }).catch(err => { throw new Error(err) })
         },
 
         /** 
@@ -578,7 +762,7 @@ class NI_Model {
                 const fields = Object.keys(where)
                 const values = Object.values(where)
                 for (let i = 0; i < fields.length; i++) {
-                    preparedWhere += `WHERE ${fields[i]} = '${values[i]}'${(i+1) == fields.length ? '' : ', '}`
+                    preparedWhere += `WHERE ${fields[i]} = '${values[i]}'${this.setDelimiter(i, fields, ',')}`
                 }
             } 
 
@@ -595,7 +779,7 @@ class NI_Model {
                         this.dbConnect.query(`DELETE FROM ${tab} ${preparedWhere}`, callback)
                     })
                 } else this.dbConnect.query(`DELETE FROM ${table} ${preparedWhere}`, callback)
-            }).catch(err => { throw err })
+            }).catch(err => { throw new Error(err) })
         },
         
         /** 
@@ -613,7 +797,7 @@ class NI_Model {
                     resolve(result.length)
                 }
                 this.dbConnect.query(`SELECT SQL_CALC_FOUND_ROWS 1 FROM ${table}`, callback)
-            }).catch(err => { throw err })
+            }).catch(err => { throw new Error(err) })
         },  
     }
 
@@ -644,6 +828,38 @@ class NI_Model {
         return validOperators.includes(inputString)
     }
 
+    setDelimiter(index, array, delimiter) {
+        return (index + 1) == array.length ? '' : `${delimiter} `
+    }
+
+    generateSelect(type, field, asField) {
+        let selectType
+        switch(type) {
+            case 'max':
+                selectType = 'MAX'
+            break
+            case 'min':
+                selectType = 'MIN'
+            break
+            case 'avg':
+                selectType = 'AVG'
+            break
+            case 'sum':
+                selectType = 'SUM'
+            break
+            default:
+                throw new Error('Illegal select type') 
+        }
+
+        const sql = `${selectType}(${field}) as ${asField ? asField : field}`
+
+        if (this.preparedQueries.field == null) {
+            this.preparedQueries.field = sql
+        } else {
+            this.preparedQueries.field += `, ${sql}`
+        }
+    }
+
     /** 
      * INSERT AND UPDATE SQLPRODUCES HANDLER
      * @params type  | String
@@ -655,9 +871,10 @@ class NI_Model {
     changeData(type = 'insert', table, data) {
         let sql
         if (this.preparedQueries.setFields.length > 0) {
+            let values
             switch (type) {
                 case 'insert':
-                    const values = this.preparedQueries.setValues.map(v => {
+                    values = this.preparedQueries.setValues.map(v => {
                         return [`'${this.filterString(v)}'`]
                     })
                     sql = `INSERT INTO ${table} (${this.preparedQueries.setFields.join(', ')}) VALUES (${values.join(', ')})`
@@ -671,17 +888,18 @@ class NI_Model {
                     sql = `UPDATE ${table} SET ${setFieldsQuery} ${where}`
                 break
                 case 'replace':
-                    const values = this.preparedQueries.setValues.map(v => {
+                    values = this.preparedQueries.setValues.map(v => {
                         return [`'${this.filterString(v)}'`]
                     })
                     sql = `REPLACE INTO ${table} (${this.preparedQueries.setFields.join(', ')}) VALUES (${values.join(', ')})`
                 break
             }
         } else {
+            let field, values
             switch (type) {
                 case 'insert':
-                    const field = Object.keys(data)
-                    const values = Object.values(data).map(d => {
+                    field = Object.keys(data)
+                    values = Object.values(data).map(d => {
                         return [`'${this.filterString(d)}'`]
                     })
                     sql = `INSERT INTO ${table} (${field.join(', ')}) VALUES (${values.join(', ')})`
@@ -697,8 +915,8 @@ class NI_Model {
                     sql = `UPDATE ${table} SET ${setFieldsQuery} ${where}`
                 break
                 case 'replace':
-                    const field = Object.keys(data)
-                    const values = Object.values(data).map(d => {
+                    field = Object.keys(data)
+                    values = Object.values(data).map(d => {
                         return [`'${this.filterString(d)}'`]
                     })
                     sql = `REPLACE INTO ${table} (${field.join(', ')}) VALUES (${values.join(', ')})`
