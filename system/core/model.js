@@ -3,13 +3,17 @@ const dbConfig = require('../../application/config/database')
 
 class NI_Model {
     constructor(req, res) {
-        this.req = req
-        this.res = res
+        this.req         = req
+        this.res         = res
+
+        this.dbPrefix    = null
+        this.tablePrefix = null
+
         this.dbConnect = mysql.createConnection({
             host:     dbConfig.HOST,
             user:     dbConfig.USER,
             password: dbConfig.PASS,
-            database: dbConfig.NAME,
+            database: (this.dbPrefix ? this.dbPrefix + "_" : "") + dbConfig.NAME,
         })
         this.preparedQueries = {
             where:        null,
@@ -28,18 +32,40 @@ class NI_Model {
     }
 
     /** 
-     * GET QUERY HANDLER
-     * @params table | Strings
+     * GET QUERY CHAIN METHOD HANDLER
+     * @params table | String
      * RETURN PACKAGE_ROWS | OBJ
      */
-    get(table) { return this.db.get(table) }
+    get(table = null) { return this.db.get(table) }
 
     /** 
-     * GENERATE QUERY HANDLER
-     * @params table | Strings
+     * GENERATE SELECT QUERY CHAIN METHOD HANDLER
+     * @params table | String
      * RETURN STRING QUERY
      */
     get_compiled_select(table) { return this.db.get_compiled_select(table) }
+   
+    /** 
+     * GENERATE INSERT QUERY CHAIN METHOD HANDLER
+     * @params table | String
+     * RETURN STRING QUERY
+     */
+    get_compiled_insert(table) { return this.db.get_compiled_insert(table) }
+    
+    /** 
+     * DB WHERE CHAIN METHOD 
+     * @params field | String
+     * @params value | String/INT
+     * insert where statements sql query to prepared var
+     */
+    where(field, value) { return this.db.where(field, value) }
+
+    /** 
+     * FROM QUERY HANDLER
+     * @params table | String
+     * GENERATE FROM TABLE QUERY 
+     */
+    from(table) { return this.db.from(table) }
 
     /** 
      * GET QUERY HANDLER
@@ -95,6 +121,35 @@ class NI_Model {
         return this.getQuery('numrows')
     }
     
+    /** 
+     * QUERY GROUPING CHAIN METHOD HANDLER
+     */
+    group_start() {
+        return this.groupQuery()
+    }
+    or_group_start() {
+        return this.groupQuery('or')
+    }
+    not_group_start() {
+        return this.groupQuery('not')
+    }
+    or_not_group_start() {
+        return this.groupQuery('or not')
+    }
+    group_end() {
+        return this.groupQuery('end')
+    }
+    
+    
+    /** 
+     * QUERY CORE GROUPING HANDLER
+     */
+    groupQuery(type = 'where') {
+        if (this.preparedQueries.where == null) {
+            this.preparedQueries.where = type == 'end' ? ' )' : ` ${type.toUpperCase()} (`
+        } else this.preparedQueries.where += type == 'end' ? ' )' : ` ${type.toUpperCase()} (`
+        return this
+    }
     
     /** 
      * QUERY CORE HANDLER
@@ -136,8 +191,16 @@ class NI_Model {
 
     db = {
 
+        // set_dbprefix: (prefix = null) => {
+        //     this.dbPrefix = prefix
+        // },
+    
+        // dbprefix: (table = null) => {
+        //     this.tablePrefix = table
+        // },
+    
         /** 
-         * DB QUERY CHAIN METHOD 
+         * DB QUERY QUERY HANDLER
          * @params sql | QueryString
          * insert sql query to prepared var
          */
@@ -147,7 +210,7 @@ class NI_Model {
         },
 
         /** 
-         * DB WHERE CHAIN METHOD 
+         * DB WHERE QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * insert where statements sql query to prepared var
@@ -178,12 +241,6 @@ class NI_Model {
                     return this
                 }
 
-                // Handle custom sql in bracket
-                // if (field.indexOf('(') !== -1) {
-                //     this.preparedQueries.where = `WHERE ${field.replace(/[()]/g, '')}`
-                //     return this
-                // }
-
                 const customOperator = field.split(' ')[1]
                 if (customOperator !== undefined && this.isValidSqlOperator(customOperator)) {
                     // Handle key value with custom operator
@@ -198,7 +255,9 @@ class NI_Model {
                 if (this.preparedQueries.where == null) {
                     this.preparedQueries.where = `WHERE ${mysql.format(sql, inserts)}`
                 } else {
-                    this.preparedQueries.where += ` AND ${mysql.format(sql, inserts)}`
+                    if (this.preparedQueries.where.endsWith('(')) {
+                        this.preparedQueries.where += ` ${mysql.format(sql, inserts)}`
+                    } else this.preparedQueries.where += ` AND ${mysql.format(sql, inserts)}`
                 }
 
                 return this
@@ -206,7 +265,7 @@ class NI_Model {
         },
 
         /** 
-         * DB OR WHERE CHAIN METHOD 
+         * DB OR WHERE QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * insert additional OR where statements sql query to prepared var
@@ -229,7 +288,7 @@ class NI_Model {
         },
         
         /** 
-         * DB WHERE IN CHAIN METHOD 
+         * DB WHERE IN QUERY HANDLER
          * @params field  | String
          * @params values | Array
          * insert where in statements sql query to prepared var
@@ -242,7 +301,7 @@ class NI_Model {
         },
 
         /** 
-         * DB OR IN WHERE CHAIN METHOD 
+         * DB OR IN WHERE QUERY HANDLER
          * @params field  | String
          * @params values | Array
          * insert additional OR IN where statements sql query to prepared var
@@ -256,7 +315,7 @@ class NI_Model {
         },
 
         /** 
-         * DB WHERE NOT IN CHAIN METHOD 
+         * DB WHERE NOT IN QUERY HANDLER
          * @params field  | String
          * @params values | Array
          * insert where not in statements sql query to prepared var
@@ -269,7 +328,7 @@ class NI_Model {
         },
 
         /** 
-         * DB OR IN WHERE CHAIN METHOD 
+         * DB OR IN WHERE QUERY HANDLER
          * @params field  | String
          * @params values | Array
          * insert additional OR IN where statements sql query to prepared var
@@ -283,7 +342,7 @@ class NI_Model {
         },
 
         /** 
-         * DB LIKE CHAIN METHOD 
+         * DB LIKE QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * insert wherelike statements sql query to prepared var
@@ -333,7 +392,7 @@ class NI_Model {
         },
 
         /** 
-         * DB OR LIKE CHAIN METHOD 
+         * DB OR LIKE QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * insert additional OR like statements sql query to prepared var
@@ -351,7 +410,7 @@ class NI_Model {
 
         
         /** 
-         * DB NOT LIKE CHAIN METHOD 
+         * DB NOT LIKE QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * insert wherelike statements sql query to prepared var
@@ -384,7 +443,7 @@ class NI_Model {
         },
 
         /** 
-         * DB OR NOT LIKE CHAIN METHOD 
+         * DB OR NOT LIKE QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * insert additional OR like statements sql query to prepared var
@@ -399,7 +458,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT CHAIN METHOD 
+         * DB SELECT QUERY HANDLER
          * @params field | String
          * insert selected fields query to prepared var
          */
@@ -429,7 +488,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT MAX CHAIN METHOD 
+         * DB SELECT MAX QUERY HANDLER
          * @params field   | String
          * @params asField | String
          * insert max selected fields query to prepared var
@@ -440,7 +499,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT MIN CHAIN METHOD 
+         * DB SELECT MIN QUERY HANDLER
          * @params field   | String
          * @params asField | String
          * insert min selected fields query to prepared var
@@ -451,7 +510,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT AVG CHAIN METHOD 
+         * DB SELECT AVG QUERY HANDLER
          * @params field   | String
          * @params asField | String
          * insert AVG selected fields query to prepared var
@@ -462,7 +521,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT SUM CHAIN METHOD 
+         * DB SELECT SUM QUERY HANDLER
          * @params field   | String
          * @params asField | String
          * insert SUM selected fields query to prepared var
@@ -473,7 +532,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT DISTINCT CHAIN METHOD 
+         * DB SELECT DISTINCT QUERY HANDLER
          * @params field | String
          * insert selected fields query to prepared var
          */
@@ -490,7 +549,7 @@ class NI_Model {
         },
 
         /** 
-         * DB JOIN CHAIN METHOD 
+         * DB JOIN QUERY HANDLER
          * @params joinTable | String
          * @params condition | String
          * @params type      | String @default INNER 
@@ -507,7 +566,7 @@ class NI_Model {
         },
 
         /** 
-         * DB LIMIT CHAIN METHOD 
+         * DB LIMIT QUERY HANDLER
          * @params limit  | INT
          * @params offset | INT
          * insert orderby statements sql query to prepared var
@@ -518,7 +577,7 @@ class NI_Model {
         },
 
         /** 
-         * DB ORDERBY CHAIN METHOD 
+         * DB ORDERBY QUERY HANDLER
          * @params field | String
          * @params type  | String @default ASC
          * insert orderby statements sql query to prepared var
@@ -535,7 +594,7 @@ class NI_Model {
         },
 
         /** 
-         * DB GROUPBY CHAIN METHOD 
+         * DB GROUPBY QUERY HANDLER
          * @params field | String/Array
          * insert orderby statements sql query to prepared var
          */
@@ -550,7 +609,7 @@ class NI_Model {
         },
 
         /** 
-         * DB SELECT FROM CHAIN METHOD 
+         * DB SELECT FROM QUERY HANDLER
          * @params table | String
          * insert from table statements sql query to prepared var
          */
@@ -565,7 +624,7 @@ class NI_Model {
         },
 
         /** 
-         * DB HAVING CHAIN METHOD 
+         * DB HAVING QUERY HANDLER
          * @params statement | String
          * insert having aggregate statements sql query to prepared var
          */
@@ -580,7 +639,7 @@ class NI_Model {
         },
 
         /** 
-         * DB OR HAVING CHAIN METHOD 
+         * DB OR HAVING QUERY HANDLER
          * @params statement | String
          * insert additional OR having aggregate statements sql query to prepared var
          */
@@ -591,7 +650,7 @@ class NI_Model {
         },
 
         /** 
-         * DB GET CHAIN METHOD 
+         * DB GET QUERY HANDLER
          * @params table | String
          * return value based prepared sql query inserted before
          */
@@ -606,23 +665,14 @@ class NI_Model {
             const groupBy   = this.preparedQueries.groupBy  || ""
             const limit     = this.preparedQueries.limit    || ""
 
-            const query = `SELECT ${field} FROM ${table ? table : from}${join}${where}${like}${having}${orderBy}${groupBy}${limit}`
+            const insertSql = `SELECT ${field} FROM ${table ? table : from}${join}${where}${like}${having}${orderBy}${groupBy}${limit}`
 
-            console.log(query)
-            return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve(result)
-                }
-                this.dbConnect.query(query, callback)
-            }).catch(err => { throw new Error(err) })
+            console.log(insertSql)
+            return await this.promiseQuery(insertSql, 'data')
         },
 
         /** 
-         * DB COMPILE GET QUERY CHAIN METHOD 
+         * DB COMPILE GET QUERY QUERY HANDLER
          * @params table | String
          * return string query without run it
          */
@@ -643,7 +693,7 @@ class NI_Model {
         },
 
         /** 
-         * DB GET WHERE CHAIN METHOD 
+         * DB GET WHERE QUERY HANDLER
          * @params table  | String
          * @params where  | OBJ
          * @params limit  | INT
@@ -662,95 +712,90 @@ class NI_Model {
                 whereQuery += `${r} = '${values[index]}'${(index+1) == rows.length ? '' : ', '}`
             })
 
-            const sql = `SELECT ${field} FROM ${table} WHERE ${whereQuery}${limitQuery}${offsetQuery}`
+            const insertSql = `SELECT ${field} FROM ${table} WHERE ${whereQuery}${limitQuery}${offsetQuery}`
 
-            console.log(sql)
-            return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve(result)
-                }
-                this.dbConnect.query(sql, callback)
-            }).catch(err => { throw new Error(err) })
+            console.log(insertSql)
+            return await this.promiseQuery(insertSql, 'data')
         },
 
         /** 
-         * DB INSERT CHAIN METHOD 
+         * DB INSERT QUERY HANDLER
          * @params table | String
          * @params data  | OBJ
          * return number of affected row based prepared sql query inserted before
          */
-        insert: async (table, data = {}) => {
-            const sql = this.changeData('insert', table, data)
-            return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve(result.affectedRows)
-                }
-                this.dbConnect.query(sql, callback)
-            }).catch(err => { throw new Error(err) })
+        insert: async (table, data = Object) => {
+            const insertSql = this.changeData('insert', table, data)
+            return await this.promiseQuery(insertSql)
         },
 
         /** 
-         * DB REPLACE CHAIN METHOD 
+         * DB INSERT BATCH QUERY HANDLER
+         * @params table | String
+         * @params data  | Array
+         * return number of affected row based prepared sql query batch inserted before
+         */
+        insert_batch: async (table, data = Array) => {
+            return this.db.insert(table, data)
+        },
+
+        /** 
+         * DB COMPILE INSERT QUERY HANDLER
+         * @params table | String
+         * return insert string query without run it
+         */
+        get_compiled_insert: (table = null, data = null) => {
+            return String(this.changeData('insert', table, data))
+        },
+
+        /** 
+         * DB REPLACE QUERY HANDLER
          * @params table | String
          * @params data  | OBJ
          * return number of affected row based prepared sql query inserted before
          */
         replace: async (table, data = {}) => {
-            const sql = this.changeData('replace', table, data)
-            return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve(result.affectedRows)
-                }
-                this.dbConnect.query(sql, callback)
-            }).catch(err => { throw new Error(err) })
+            const replaceSql = this.changeData('replace', table, data)
+            return await this.promiseQuery(replaceSql)
         },
 
         /** 
-         * DB SET CHAIN METHOD 
+         * DB SET QUERY HANDLER
          * @params field | String
          * @params value | String/INT
          * set prepared sql query and inserted to prepared var
          */
-        set: (field, value) => {
+        set: (field, value = null) => {
+            if (field instanceof Object && !value) {
+                const fieldQuery = Object.keys(field)
+                const valueQuery = Object.values(field)
+        
+                fieldQuery.forEach((f, i) => {
+                    this.preparedQueries.setFields.push(f)
+                    this.preparedQueries.setValues.push(valueQuery[i])
+                })
+
+                return this
+            }
+
             this.preparedQueries.setFields.push(field)
             this.preparedQueries.setValues.push(value)
             return this
         },
 
         /** 
-         * DB UPDATE CHAIN METHOD 
+         * DB UPDATE QUERY HANDLER
          * @params table | String
          * @params data  | OBJ
          * return number of affected row based prepared sql query updated before
          */
-        update: async (table, data = {}) => {
-            const sql = this.changeData('update', table, data)
-            return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve(result.affectedRows)
-                }
-                this.dbConnect.query(sql, callback)
-            }).catch(err => { throw new Error(err) })
+        update: async (table, data = Object) => {
+            const updateSql = this.changeData('update', table, data)
+            return await this.promiseQuery(updateSql)
         },
 
         /** 
-         * DB DELETE CHAIN METHOD 
+         * DB DELETE QUERY HANDLER
          * @params table | String
          * @params where | OBJ
          * return number of affected row based prepared sql query updated before
@@ -783,22 +828,31 @@ class NI_Model {
         },
         
         /** 
-         * DB COUNT TABLE ROWS CHAIN METHOD 
+         * DB COUNT TABLE ROWS QUERY HANDLER
          * @params table | String
          * return count row in selected table | INT
          */
         count_all: async (table) => {
-            return new Promise((resolve, reject) => {
-                const callback = (error, result) => {
-                    if (error) {
-                        reject(error)
-                        return
-                    }
-                    resolve(result.length)
-                }
-                this.dbConnect.query(`SELECT SQL_CALC_FOUND_ROWS 1 FROM ${table}`, callback)
-            }).catch(err => { throw new Error(err) })
+           return await this.promiseQuery(`SELECT SQL_CALC_FOUND_ROWS 1 FROM ${table}`, 'length')
         },  
+
+        /** 
+         * DB EMPTY TABLE QUERY HANDLER
+         * @params table | String
+         * return affected rows | INT
+         */    
+        empty_table: async (table) => {
+            return await this.promiseQuery(`DELETE FROM ${table}`)
+        },
+
+        /** 
+         * DB TRUNCATE TABLE QUERY HANDLER
+         * @params table | String
+         * return affected rows | INT
+         */    
+        truncate: async (table) => {
+            return await this.promiseQuery(`TRUNCATE ${table}`)
+        },
     }
 
     /** 
@@ -830,6 +884,31 @@ class NI_Model {
 
     setDelimiter(index, array, delimiter) {
         return (index + 1) == array.length ? '' : `${delimiter} `
+    }
+
+    async promiseQuery(query, expectedReturn = 'afrows') {
+        return new Promise((resolve, reject) => {
+            const callback = (error, result) => {
+                if (error) {
+                    reject(error)
+                    return
+                }
+
+                switch (expectedReturn) {
+                    case 'afrows':
+                        resolve(result.affectedRows)
+                    break
+                    case 'length':
+                        resolve(result.length)
+                    break
+                    case 'data':
+                        resolve(result)
+                    break
+                }
+            }
+
+            this.dbConnect.query(query, callback)
+        }).catch(err => { throw new Error(err) })
     }
 
     generateSelect(type, field, asField) {
@@ -898,11 +977,24 @@ class NI_Model {
             let field, values
             switch (type) {
                 case 'insert':
-                    field = Object.keys(data)
-                    values = Object.values(data).map(d => {
-                        return [`'${this.filterString(d)}'`]
-                    })
-                    sql = `INSERT INTO ${table} (${field.join(', ')}) VALUES (${values.join(', ')})`
+                    if (data instanceof Array) {
+                        data.forEach(dt => {
+                            field = Object.keys(dt)
+                            values = Object.values(dt).map(d => {
+                                return [`'${this.filterString(d)}'`]
+                            })
+                            
+                            if (sql) {
+                                sql += `, (${values.join(', ')})`
+                            } else sql = `INSERT INTO ${table} (${field.join(', ')}) VALUES (${values.join(', ')})`
+                        })
+                    } else {
+                        field = Object.keys(data)
+                        values = Object.values(data).map(d => {
+                            return [`'${this.filterString(d)}'`]
+                        })
+                        sql = `INSERT INTO ${table} (${field.join(', ')}) VALUES (${values.join(', ')})`
+                    }
                 break
                 case 'update':
                     const where = this.preparedQueries.where || ''
@@ -923,6 +1015,8 @@ class NI_Model {
                 break
             }
         }
+
+        console.log(sql)
         return sql
     }
 }
