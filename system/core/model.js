@@ -1,20 +1,18 @@
 const mysql = require('mysql')
 const dbConfig = require('../../application/config/database')
+const nodeCache = require('node-cache')
+const { thenResolve } = require('q')
 
 class NI_Model {
     constructor(req, res) {
         this.req         = req
         this.res         = res
 
-        this.dbPrefix    = null
-        this.tablePrefix = null
+        this.cache       = new nodeCache()
 
-        this.dbConnect = mysql.createConnection({
-            host:     dbConfig.HOST,
-            user:     dbConfig.USER,
-            password: dbConfig.PASS,
-            database: (this.dbPrefix ? this.dbPrefix + "_" : "") + dbConfig.NAME,
-        })
+        this.tablePrefix = ""
+        this.dbConnect   = this.connect()
+
         this.preparedQueries = {
             where:        null,
             from:         null,
@@ -25,10 +23,64 @@ class NI_Model {
             orderBy:      null,
             groupBy:      null,
             limit:        null,
-            prepareQuery: null,
+            query:        null,
             setFields:      [],
             setValues:      [],
         }
+
+        this.useCache         = false
+        this.cacheFlushReady  = false
+        this.cacheModeTrigger = false
+    }
+
+    flushQuery() {
+        this.preparedQueries = {
+            where:        null,
+            from:         null,
+            like:         null,
+            field:        null,
+            join:         null,
+            having:       null,
+            orderBy:      null,
+            groupBy:      null,
+            limit:        null,
+            query:        null,
+            setFields:      [],
+            setValues:      [],
+        }
+    }
+
+    getQueryCache() {
+        if (!this.useCache) return
+
+        const cacheQuery = this.cache.get('preparedQueries')
+        this.preparedQueries = {
+            where:        cacheQuery.where ? ` ${cacheQuery.where}` : null,
+            from:         cacheQuery.from || "",
+            like:         cacheQuery.like || "",
+            field:        cacheQuery.field || "",
+            join:         cacheQuery.join || "",
+            having:       cacheQuery.having || "",
+            orderBy:      cacheQuery.orderBy || "",
+            groupBy:      cacheQuery.groupBy || "",
+        }
+
+        console.log(this.useCache)
+        console.log(this.preparedQueries)
+    }
+
+    /** 
+     * MYSQL CONNECT 
+     * @params prefix | String
+     */
+    connect(prefix = "") {
+        const dbPrefix = prefix != "" ? prefix + "_" : ""
+        return mysql.createConnection({
+            host:     dbConfig.HOST,
+            user:     dbConfig.USER,
+            password: dbConfig.PASS,
+            database: dbPrefix + dbConfig.NAME,
+        })
     }
 
     /** 
@@ -36,21 +88,21 @@ class NI_Model {
      * @params table | String
      * RETURN PACKAGE_ROWS | OBJ
      */
-    get(table = null) { return this.db.get(table) }
+    get(table = null) { return this.db.get(this.tablePrefix + table) }
 
     /** 
      * GENERATE SELECT QUERY CHAIN METHOD HANDLER
      * @params table | String
      * RETURN STRING QUERY
      */
-    get_compiled_select(table) { return this.db.get_compiled_select(table) }
+    get_compiled_select(table) { return this.db.get_compiled_select(this.tablePrefix + table) }
    
     /** 
      * GENERATE INSERT QUERY CHAIN METHOD HANDLER
      * @params table | String
      * RETURN STRING QUERY
      */
-    get_compiled_insert(table) { return this.db.get_compiled_insert(table) }
+    get_compiled_insert(table) { return this.db.get_compiled_insert(this.tablePrefix + table) }
     
     /** 
      * DB WHERE CHAIN METHOD 
@@ -61,11 +113,19 @@ class NI_Model {
     where(field, value) { return this.db.where(field, value) }
 
     /** 
-     * FROM QUERY HANDLER
+     * FROM CHAIN METHOD
      * @params table | String
      * GENERATE FROM TABLE QUERY 
      */
     from(table) { return this.db.from(table) }
+
+    /** 
+     * LIMIT CHAIN METHOD
+     * @params limit  | INT
+     * @params offset | INT
+     * SET LIMIT DB QUERY
+     */
+    limit(limit, offset) { return this.db.limit(limit, offset) }
 
     /** 
      * GET QUERY HANDLER
@@ -159,7 +219,7 @@ class NI_Model {
      */
     getQuery(type = 'object') {
         return new Promise((resolve, reject) => {
-            this.dbConnect.query(this.prepareQuery, function(error, result){
+            this.dbConnect.query(this.preparedQueries.query, function(error, result){
                 if (error) {
                     reject(error)
                     return
@@ -191,21 +251,44 @@ class NI_Model {
 
     db = {
 
-        // set_dbprefix: (prefix = null) => {
-        //     this.dbPrefix = prefix
-        // },
-    
-        // dbprefix: (table = null) => {
-        //     this.tablePrefix = table
-        // },
+        /** 
+         * SET DB PREFIX HANDLER
+         * @params dbPrefix | String
+         */
+        set_dbprefix: (dbPrefix = "") => {
+            this.dbConnect = this.connect(dbPrefix)
+        },
+        
+        /** 
+         * SET TABLE PREFIX HANDLER
+         * @params tablePrefix | String
+         */
+        dbprefix: (tablePrefix = "") => {
+            this.tablePrefix = tablePrefix == "" ? "" : tablePrefix + "_"
+        },
+
+        start_cache: () => {
+            this.useCache         = true
+            this.cacheModeTrigger = true
+        },
+        
+        stop_cache: () => {
+            this.useCache         = false
+            this.cacheModeTrigger = false
+        },
+        
+        flush_cache: () => {
+            this.flushQuery()
+            this.cache.del('preparedQueries')
+        },
     
         /** 
-         * DB QUERY QUERY HANDLER
+         * DB QUERY HANDLER
          * @params sql | QueryString
          * insert sql query to prepared var
          */
         query: (sqlQuery) => {
-            this.prepareQuery = this.filterString(sqlQuery)
+            this.preparedQueries.query = this.filterString(sqlQuery)
             return this
         },
 
@@ -232,6 +315,12 @@ class NI_Model {
                 }
                 
                 this.preparedQueries.where = bulkWhere
+
+                if(this.useCache) { 
+                    this.cache.set('preparedQueries', { where: bulkWhere })
+                    this.getQueryCache()
+                }
+
                 return this
             } else {
                 
@@ -253,13 +342,26 @@ class NI_Model {
                 const inserts              = [field.split(' ')[0], value]
 
                 if (this.preparedQueries.where == null) {
-                    this.preparedQueries.where = `WHERE ${mysql.format(sql, inserts)}`
+                    this.preparedQueries.where = ` WHERE ${mysql.format(sql, inserts)}`
+                    if(this.useCache) this.cache.set('preparedQueries', { where: 'WHERE ' + mysql.format(sql, inserts) })
                 } else {
                     if (this.preparedQueries.where.endsWith('(')) {
                         this.preparedQueries.where += ` ${mysql.format(sql, inserts)}`
-                    } else this.preparedQueries.where += ` AND ${mysql.format(sql, inserts)}`
+                        if(this.useCache) {
+                            const whereCached = this.cache.get('preparedQueries').where
+                            this.cache.set('preparedQueries', { where: whereCached + ` ${mysql.format(sql, inserts)}` })
+                        }
+                    } else {
+                        this.preparedQueries.where += ` AND ${mysql.format(sql, inserts)}`
+
+                        if (this.useCache) {
+                            const whereCached = this.cache.get('preparedQueries').where
+                            this.cache.set('preparedQueries', { where: whereCached + ` AND ${mysql.format(sql, inserts)}` })
+                        }
+                    }
                 }
 
+                this.getQueryCache()
                 return this
             }
         },
@@ -905,6 +1007,18 @@ class NI_Model {
                         resolve(result)
                     break
                 }
+
+                if (!this.useCache && this.cacheFlushReady) this.flushQuery() 
+                else if (!this.useCache && this.cacheModeTrigger) {
+                    this.cacheFlushReady = true
+                    this.cacheModeTrigger = false
+                } 
+                
+                // if (!this.useCache && !this.cacheModeTrigger) {
+                //     this.flushQuery()
+                // }
+                
+                if (!this.cacheModeTrigger && !this.useCache) this.flushQuery()
             }
 
             this.dbConnect.query(query, callback)
